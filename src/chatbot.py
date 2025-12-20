@@ -4,12 +4,12 @@ from src.utils.exception import CustomException
 import os
 import sys
 import re
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate
 
-load_dotenv()
+# load_dotenv()
 
 # Initialize Groq LLM
 llm = ChatGroq(
