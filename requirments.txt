@@ -6,3 +6,4 @@ pypdf
 dotenv
 tiktoken
 langchain-core
+groq
