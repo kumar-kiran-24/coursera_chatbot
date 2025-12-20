@@ -3,6 +3,6 @@ langchain
 langchain-community
 langchain-groq
 pypdf
-python-dotenv
+dotenv
 tiktoken
 langchain-core
