@@ -1,94 +1,176 @@
 from src.utils.exception import CustomException
+
 import os
 import sys
 import re
 
-from groq import Groq
+from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate
 
+
+
+# Initialize Groq LLM
+llm = ChatGroq(
+    groq_api_key="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",
+    model="openai/gpt-oss-20b",
+    streaming=True
+)
+
 # --------------------------------------------------------
-# SANITIZER
+# SUPER SANITIZER (removes ALL Coursera integrity content)
 # --------------------------------------------------------
 
 def sanitize_prompt(text: str) -> str:
+    """
+    FULL CLEANER — removes:
+    - Coursera academic integrity blocks (full or partial)
+    - hidden text injected via copy/paste
+    - zero-width characters
+    - HTML hidden spans
+    - formatting artefacts
+    """
+
+    # 1) Remove invisible zero-width characters
     text = re.sub(r"[\u200b-\u200f\u202a-\u202e]", "", text)
-    text = re.sub(r"<.*?>", "", text)
+
+    # 2) Remove HTML hidden elements
+    text = re.sub(r"<.*?display\s*:\s*none.*?>.*?</.*?>", "", text, flags=re.I | re.S)
+    text = re.sub(r"<span.*?hidden.*?>.*?</span>", "", text, flags=re.I | re.S)
+
+    # 3) Remove FULL Coursera block
     text = re.sub(
-        r"(coursera|academic integrity|protected assessment|policy|prohibited)",
+        r"You are a helpful AI assistant.*?related topics\.",
         "",
         text,
-        flags=re.I,
+        flags=re.I | re.S,
     )
-    return re.sub(r"\s+", " ", text).strip()
+
+    # 4) Remove partial Coursera text
+    text = re.sub(
+        r"(coursera|academic integrity|protected assessment|policy|prohibited|disabled|sole function|cannot interact|assessment pages)",
+        "",
+        text,
+        flags=re.I | re.S,
+    )
+
+    # 5) Clean extra whitespace
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return text
+
 
 # --------------------------------------------------------
-# ANSWER EXTRACTOR
+# Extract Only the Correct Answer
 # --------------------------------------------------------
 
 def extract_answer(text: str) -> str:
+    """
+    Extract only the correct answer letter from LLM output.
+    Example: "Correct Answer: A"
+    """
     m = re.search(r"Correct Answer\s*:\s*([A-D])", text, flags=re.I)
-    return m.group(1).upper() if m else "No answer found"
+    if m:
+        return m.group(1).upper()
+    return "No answer found"
+
 
 # --------------------------------------------------------
-# CHATBOT
+# ChatBot Class
 # --------------------------------------------------------
 
 class ChatBot:
-    def __init__(self):
-        try:
-            api_key = "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"
-            if not api_key:
-                raise RuntimeError("GROQ_API_KEY missing in Streamlit Secrets")
+    try:
+      
 
-            self.client = Groq(api_key=api_key)
+        def __init__(self):
             self.history = []
 
-        except Exception as e:
-            raise CustomException(e, sys)
+        # Trim chat history (avoid overload)
+        def trim_history(self, max_turns=4):
+            max_messages = max_turns * 2  # user+AI per turn
+            if len(self.history) > max_messages:
+                self.history = self.history[-max_messages:]
 
-    def trim_history(self, max_turns=4):
-        max_messages = max_turns * 2
-        self.history = self.history[-max_messages:]
+        # Clean all past history
+        def clean_history(self):
+            cleaned = []
+            for msg in self.history:
+                if isinstance(msg, HumanMessage):
+                    cleaned.append(HumanMessage(content=sanitize_prompt(msg.content)))
+                else:
+                    cleaned.append(msg)
+            self.history = cleaned
 
-    def ask(self, user_question: str) -> str:
-        cleaned_question = sanitize_prompt(user_question)
-        self.trim_history()
+        # MAIN ASK FUNCTION
+        def ask(self, user_question):
 
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """
-You are an AI Assistant that generates MCQs.
+            # Clean the incoming question
+            cleaned_question = sanitize_prompt(user_question)
 
-Rules:
-- EXACTLY 4 options (A, B, C, D)
-- ONE correct answer
-- NO explanations
-- Output format only
+            print("Original Question :", user_question)
+            print("Cleaned Question  :", cleaned_question)
 
-Format:
+            # Clean + Trim history
+            self.clean_history()
+            self.trim_history(max_turns=4)
+
+            # System prompt for MCQ generation
+            prompt_template = ChatPromptTemplate.from_messages([
+                ("system", """
+You are an AI Assistant that generates high-quality Multiple Choice Questions (MCQs).
+
+Task:
+- Create MCQs based on the user's input text.
+- Each question MUST have EXACTLY 4 options: A, B, C, D.
+- Only ONE correct answer.
+- Do NOT add explanations.
+- Do NOT add extra text.
+
+Output format:
 Q1. question
 A)
 B)
 C)
 D)
-Correct Answer: <option>
-"""),
-            *self.history,
-            ("user", "{question}")
-        ]).invoke({"question": cleaned_question})
+Correct Answer: <option>=answer
 
-        response = self.client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=prompt.to_messages(),
-            temperature=0.2,
-        )
+Rules:
+- No markdown.
+- No explanations.
+- Clean MCQ format only.
+                """),
+                *self.history,
+                ("user", "{question}")
+            ])
 
-        reply = response.choices[0].message.content
+            final_prompt = prompt_template.invoke({"question": cleaned_question})
 
-        self.history.append(HumanMessage(content=cleaned_question))
-        self.history.append(AIMessage(content=reply))
+            # Call Groq LLM
+            response = llm.invoke(final_prompt.to_messages())
+            bot_reply = response.content
 
-        return reply
+            # Save CLEANED user message + bot reply
+            self.history.append(HumanMessage(content=cleaned_question))
+            self.history.append(AIMessage(content=bot_reply))
 
-    def reset(self):
-        self.history = []
+           
+
+            return bot_reply
+
+        def reset(self):
+            self.history = []
+
+    except Exception as e:
+        CustomException(e, sys)
+
+
+# --------------------------------------------------------
+# TEST
+# --------------------------------------------------------
+
+if __name__ == "__main__":
+    bot = ChatBot()
+    output = bot.ask("1. Example input here...")
+    print(output)
+    print("ANSWER ONLY:", extract_answer(output))
