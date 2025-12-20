@@ -1,9 +1,6 @@
 streamlit
 langchain
 langchain-community
-langchain-groq 
-pypdf
-dotenv
-tiktoken
 langchain-core
 groq
+
