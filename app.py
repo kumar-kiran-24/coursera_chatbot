@@ -14,6 +14,9 @@ st.write("GIVE THE QUESTION WITH OPTIONS")
 def load_bot():
     return ChatBot()
 
+###
+
+
 bot = load_bot()
 
 if "chat_history" not in st.session_state:
